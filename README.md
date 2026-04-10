@@ -141,6 +141,13 @@ Create or edit `.mcp.json` in your project directory (or `~/.claude/.mcp.json` f
 
 Then **restart Claude Code**.
 
+> ⚠️ **Important:** Claude Code only loads `.mcp.json` from the directory where you launch it. Make sure you start Claude Code in the same directory as your `.mcp.json`:
+> ```bash
+> cd /path/to/your/project   # where .mcp.json lives
+> claude                     # start Claude Code here
+> ```
+> Alternatively, place it at `~/.claude/.mcp.json` for **global access** from any directory.
+
 #### 🖥️ Option B: Claude Desktop
 
 Edit your Claude Desktop config file:
