@@ -1,0 +1,32 @@
+{
+  "name": "overleaf-claude-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for reading and writing Overleaf projects via Claude Code / Claude Desktop",
+  "type": "module",
+  "main": "overleaf-mcp-server.js",
+  "bin": {
+    "overleaf-mcp": "./overleaf-mcp-server.js"
+  },
+  "scripts": {
+    "start": "node overleaf-mcp-server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "overleaf",
+    "latex",
+    "claude",
+    "claude-code",
+    "model-context-protocol"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Junfei-Z/overleaf-claude-mcp.git"
+  }
+}
