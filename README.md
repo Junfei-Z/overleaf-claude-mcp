@@ -1,29 +1,56 @@
-# Overleaf Claude MCP
+# 🍃 Overleaf Claude MCP
 
-An MCP (Model Context Protocol) server that connects **Claude Code / Claude Desktop** with your **Overleaf** projects. Read, write, and push LaTeX files directly through Claude.
+> 🤖 Let Claude **read, write, and push** your Overleaf LaTeX projects — all from the chat.
 
-Based on [mjyoo2/OverleafMCP](https://github.com/mjyoo2/OverleafMCP), with added **write and push** capabilities.
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![MCP](https://img.shields.io/badge/MCP-Compatible-blue?logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTIgMkw0IDdWMTdMMTIgMjJMMjAgMTdWN0wxMiAyWiIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIi8+PC9zdmc+)](https://modelcontextprotocol.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Features
+An MCP (Model Context Protocol) server that connects **Claude Code / Claude Desktop** with your **Overleaf** projects.
+
+---
+
+## 🆚 What's New vs [mjyoo2/OverleafMCP](https://github.com/mjyoo2/OverleafMCP)
+
+The original [OverleafMCP](https://github.com/mjyoo2/OverleafMCP) is **read-only** — you can view your files but can't change anything. This fork adds **full write support**:
+
+| Capability | mjyoo2/OverleafMCP | ✨ This Project |
+|:-----------|:------------------:|:---------------:|
+| 📖 Read files from Overleaf | ✅ | ✅ |
+| 📑 Parse LaTeX sections | ✅ | ✅ |
+| 📋 List projects & files | ✅ | ✅ |
+| 📊 Project status summary | ✅ | ✅ |
+| ✏️ **Write / edit files** | ❌ | ✅ **NEW** |
+| 🚀 **Commit & push to Overleaf** | ❌ | ✅ **NEW** |
+
+> 💡 With write + push, Claude becomes a **full co-author** — it can read your paper, make edits, and push them back to Overleaf in one conversation.
+
+---
+
+## 🛠️ All Available Tools
 
 | Tool | Description |
-|------|-------------|
-| `list_projects` | List all configured Overleaf projects |
-| `list_files` | List files in a project (filter by extension) |
-| `read_file` | Read any file from your Overleaf project |
-| `get_sections` | Extract all section/subsection headings from a LaTeX file |
-| `get_section_content` | Get content of a specific section by title |
-| `write_file` | Write/update a file in the project |
-| `push_changes` | Commit and push changes back to Overleaf |
-| `status_summary` | Get a quick overview of the project |
+|:-----|:------------|
+| 📋 `list_projects` | List all configured Overleaf projects |
+| 📂 `list_files` | List files in a project (filter by extension) |
+| 📖 `read_file` | Read any file from your Overleaf project |
+| 📑 `get_sections` | Extract all section/subsection headings from a LaTeX file |
+| 🔍 `get_section_content` | Get content of a specific section by title |
+| ✏️ `write_file` | Write/update a file in the project **(NEW)** |
+| 🚀 `push_changes` | Commit and push changes back to Overleaf **(NEW)** |
+| 📊 `status_summary` | Get a quick overview of the project |
 
-## Prerequisites
+---
 
-- **Node.js** >= 18
-- **Git** installed on your system
-- An **Overleaf** account with Git integration enabled
+## 📋 Prerequisites
 
-## Setup
+- 📦 **Node.js** >= 18
+- 🔧 **Git** installed on your system
+- 🍃 An **Overleaf** account with Git integration enabled
+
+---
+
+## 🚀 Setup
 
 ### Step 1: Clone this repo
 
@@ -37,7 +64,7 @@ npm install
 
 You need two things from Overleaf:
 
-#### Project ID
+#### 🔑 Project ID
 
 1. Open your project in Overleaf
 2. Look at the browser URL:
@@ -47,14 +74,14 @@ You need two things from Overleaf:
                                      This is your Project ID
    ```
 
-#### Git Token
+#### 🔐 Git Token
 
 1. Go to [Overleaf Account Settings](https://www.overleaf.com/user/settings)
 2. Scroll to the **Git Integration** section
 3. Click **Create token**
 4. Copy the token (it starts with `olp_...`)
 
-> **Important:** Keep your Git Token private. Never commit it to version control.
+> ⚠️ **Important:** Keep your Git Token private. Never commit it to version control.
 
 ### Step 3: Configure your project(s)
 
@@ -76,7 +103,7 @@ Edit `projects.json` with your credentials:
 }
 ```
 
-You can add multiple projects:
+📚 You can add **multiple projects**:
 
 ```json
 {
@@ -97,7 +124,7 @@ You can add multiple projects:
 
 ### Step 4: Connect to Claude
 
-#### Option A: Claude Code (CLI / IDE extension)
+#### 💻 Option A: Claude Code (CLI / IDE extension)
 
 Create or edit `.mcp.json` in your project directory (or `~/.claude/.mcp.json` for global access):
 
@@ -114,12 +141,12 @@ Create or edit `.mcp.json` in your project directory (or `~/.claude/.mcp.json` f
 
 Then **restart Claude Code**.
 
-#### Option B: Claude Desktop
+#### 🖥️ Option B: Claude Desktop
 
 Edit your Claude Desktop config file:
 
-- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+- 🍎 **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- 🪟 **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -134,11 +161,13 @@ Edit your Claude Desktop config file:
 
 Then **restart Claude Desktop**.
 
-## Usage Examples
+---
+
+## 💬 Usage Examples
 
 Once connected, you can ask Claude things like:
 
-### Reading
+### 📖 Reading
 
 > "List all files in my Overleaf project"
 
@@ -148,7 +177,7 @@ Once connected, you can ask Claude things like:
 
 > "Get the content of the Introduction section"
 
-### Writing
+### ✏️ Writing (NEW!)
 
 > "Add a new paragraph to the Related Work section"
 
@@ -158,22 +187,24 @@ Once connected, you can ask Claude things like:
 
 > "Push the changes to Overleaf with commit message 'Updated abstract'"
 
-### Typical Workflow
+### 🔄 Typical Workflow
 
 ```
-You:    "Read main.tex from my Overleaf project"
-Claude: [reads the file via MCP]
+You:    💬 "Read main.tex from my Overleaf project"
+Claude: 📖 [reads the file via MCP]
 
-You:    "Rewrite the introduction to emphasize our main contribution"
-Claude: [rewrites and calls write_file]
+You:    💬 "Rewrite the introduction to emphasize our main contribution"
+Claude: ✏️ [rewrites and calls write_file]
 
-You:    "Push to Overleaf"
-Claude: [calls push_changes, changes appear in Overleaf]
+You:    💬 "Push to Overleaf"
+Claude: 🚀 [calls push_changes, changes appear in Overleaf]
 ```
 
-After pushing, open Overleaf in your browser — the changes will be there.
+After pushing, open Overleaf in your browser — the changes will be there! ✅
 
-## Multi-Project Usage
+---
+
+## 📚 Multi-Project Usage
 
 When using multiple projects, specify which one:
 
@@ -183,26 +214,34 @@ When using multiple projects, specify which one:
 
 The `projectName` parameter matches the key in your `projects.json` (e.g., `"default"`, `"paper2"`).
 
-## Security
+---
 
-- `projects.json` is in `.gitignore` and will **never** be committed
-- Git tokens are only used locally to communicate with Overleaf's Git bridge
-- You can rotate your token anytime in [Overleaf Account Settings](https://www.overleaf.com/user/settings)
+## 🔒 Security
 
-## Troubleshooting
+- 🛡️ `projects.json` is in `.gitignore` and will **never** be committed
+- 🔑 Git tokens are only used locally to communicate with Overleaf's Git bridge
+- 🔄 You can rotate your token anytime in [Overleaf Account Settings](https://www.overleaf.com/user/settings)
+
+---
+
+## ❓ Troubleshooting
 
 | Problem | Solution |
-|---------|----------|
-| MCP server not showing up | Make sure you restarted Claude Code / Claude Desktop after editing config |
-| `Error loading projects.json` | Run `cp projects.example.json projects.json` and fill in your credentials |
-| Git clone fails | Double-check your project ID and git token |
-| Push fails | Make sure your git token has write access; check if someone else is editing the same file on Overleaf |
+|:--------|:---------|
+| 🔌 MCP server not showing up | Make sure you restarted Claude Code / Claude Desktop after editing config |
+| ⚙️ `Error loading projects.json` | Run `cp projects.example.json projects.json` and fill in your credentials |
+| 🔗 Git clone fails | Double-check your project ID and git token |
+| 🚫 Push fails | Make sure your git token has write access; check if someone else is editing the same file on Overleaf |
 
-## Credits
+---
 
-- Original read-only MCP server: [mjyoo2/OverleafMCP](https://github.com/mjyoo2/OverleafMCP)
-- Write/push functionality added by [Junfei-Z](https://github.com/Junfei-Z) with Claude Code
+## 🙏 Credits
 
-## License
+- 📦 Original read-only MCP server: [mjyoo2/OverleafMCP](https://github.com/mjyoo2/OverleafMCP)
+- ✨ Write/push functionality added by [Junfei-Z](https://github.com/Junfei-Z) with Claude Code
+
+---
+
+## 📄 License
 
 MIT
