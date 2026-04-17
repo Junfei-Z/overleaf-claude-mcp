@@ -7,12 +7,13 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { spawn } from 'child_process';
-import { readFile } from 'fs/promises';
+import { readFile, writeFile as fsWriteFile } from 'fs/promises';
 import { promisify } from 'util';
 import { exec as execCallback } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import os from 'os';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,49 +39,144 @@ class OverleafGitClient {
     this.gitToken = gitToken;
     this.repoPath = path.join(os.tmpdir(), `overleaf-${projectId}`);
     this.gitUrl = `https://git.overleaf.com/${projectId}`;
+    this._lastPull = 0;
+    this._fileHashes = new Map(); // track file content hashes for diff detection
+    // Only sync these file types (skip images, PDFs, etc.)
+    this._textPatterns = ['*.tex', '*.bib', '*.bst', '*.cls', '*.sty', '*.bbl', '*.cfg'];
   }
 
-  async cloneOrPull() {
+  // Compute hash of file content for change detection
+  _hashContent(content) {
+    return crypto.createHash('md5').update(content).digest('hex');
+  }
+
+  // Configure sparse checkout to only pull text files
+  async _setupSparseCheckout() {
+    const patterns = this._textPatterns.join('\n');
+    await exec(`cd "${this.repoPath}" && git sparse-checkout init --cone`);
+    await exec(`cd "${this.repoPath}" && git sparse-checkout set --no-cone ${this._textPatterns.join(' ')}`);
+  }
+
+  // Full pull - always hits the network
+  async _forcePull() {
     try {
-      // Check if repo exists
       await exec(`test -d "${this.repoPath}/.git"`);
-      // Pull latest changes
       const { stdout } = await exec(`cd "${this.repoPath}" && git pull`, {
         env: { ...process.env, GIT_ASKPASS: 'echo', GIT_PASSWORD: this.gitToken }
       });
+      this._lastPull = Date.now();
       return stdout;
     } catch {
-      // Clone repo - Overleaf requires format: https://git:TOKEN@git.overleaf.com/PROJECT_ID
-      const { stdout } = await exec(
-        `git clone https://git:${this.gitToken}@git.overleaf.com/${this.projectId} "${this.repoPath}"`
+      // Clone with no-checkout first, then set up sparse checkout
+      await exec(
+        `git clone --no-checkout https://git:${this.gitToken}@git.overleaf.com/${this.projectId} "${this.repoPath}"`
       );
+      await this._setupSparseCheckout();
+      const { stdout } = await exec(`cd "${this.repoPath}" && git checkout`);
+      this._lastPull = Date.now();
       return stdout;
     }
   }
 
-  async listFiles(extension = '.tex') {
+  // Smart pull - skip if pulled recently (for write operations that don't need latest)
+  async _ensureRepo() {
+    try {
+      await exec(`test -d "${this.repoPath}/.git"`);
+    } catch {
+      await this._forcePull();
+    }
+  }
+
+  // Read operations: always pull to get latest from Overleaf
+  async cloneOrPull() {
+    await this._forcePull();
+  }
+
+  async listFiles(extension = '') {
     await this.cloneOrPull();
+    // If no extension specified, list all text files that were checked out
+    const extFilter = extension || '.tex';
     const { stdout } = await exec(
-      `find "${this.repoPath}" -name "*${extension}" -type f`
+      `cd "${this.repoPath}" && git ls-files -- "*${extFilter}"`
     );
     return stdout
       .split('\n')
-      .filter(f => f)
-      .map(f => f.replace(this.repoPath + '/', ''));
+      .filter(f => f);
+  }
+
+  // List all synced text files (tex + bib + style files)
+  async listAllTextFiles() {
+    await this.cloneOrPull();
+    const patterns = this._textPatterns.map(p => `"${p}"`).join(' ');
+    const { stdout } = await exec(
+      `cd "${this.repoPath}" && git ls-files -- ${this._textPatterns.join(' ')}`
+    );
+    return stdout
+      .split('\n')
+      .filter(f => f);
   }
 
   async readFile(filePath) {
     await this.cloneOrPull();
     const fullPath = path.join(this.repoPath, filePath);
-    return await readFile(fullPath, 'utf-8');
+    const content = await readFile(fullPath, 'utf-8');
+    const hash = this._hashContent(content);
+    const prevHash = this._fileHashes.get(filePath);
+    this._fileHashes.set(filePath, hash);
+
+    // First read or content changed: return full content
+    if (!prevHash || prevHash !== hash) {
+      return { content, changed: true, isFirstRead: !prevHash };
+    }
+
+    // No changes since last read
+    return { content: null, changed: false, isFirstRead: false };
+  }
+
+  // Read file with diff: returns only what changed since last read
+  async readFileSmart(filePath) {
+    const result = await this.readFile(filePath);
+
+    if (result.isFirstRead) {
+      return `[Full content - first read]\n${result.content}`;
+    }
+
+    if (!result.changed) {
+      return `[No changes since last read]`;
+    }
+
+    // Content changed - try to get a diff
+    try {
+      const { stdout } = await exec(
+        `cd "${this.repoPath}" && git diff HEAD~1 -- "${filePath}"`,
+        { maxBuffer: 1024 * 1024 }
+      );
+      if (stdout.trim()) {
+        return `[Changed - diff follows]\n${stdout}`;
+      }
+    } catch {
+      // diff failed, fall through to full content
+    }
+
+    return `[Changed - full content]\n${result.content}`;
+  }
+
+  // Read full content (bypass diff, for when full content is explicitly needed)
+  async readFileFull(filePath) {
+    await this.cloneOrPull();
+    const fullPath = path.join(this.repoPath, filePath);
+    const content = await readFile(fullPath, 'utf-8');
+    const hash = this._hashContent(content);
+    this._fileHashes.set(filePath, hash);
+    return content;
   }
 
   async getSections(filePath) {
-    const content = await this.readFile(filePath);
+    const content = await this.readFileFull(filePath);
     const sections = [];
     const sectionRegex = /\\(?:section|subsection|subsubsection)\{([^}]+)\}/g;
     let match;
-    
+
     while ((match = sectionRegex.exec(content)) !== null) {
       sections.push({
         title: match[1],
@@ -88,39 +184,95 @@ class OverleafGitClient {
         index: match.index
       });
     }
-    
+
     return sections;
   }
 
+  // Write operations: no pull needed, write directly to local repo
   async writeFile(filePath, content) {
-    await this.cloneOrPull();
+    await this._ensureRepo();
     const fullPath = path.join(this.repoPath, filePath);
-    const { writeFile } = await import('fs/promises');
-    await writeFile(fullPath, content, 'utf-8');
+    await fsWriteFile(fullPath, content, 'utf-8');
+    // Update hash cache
+    this._fileHashes.set(filePath, this._hashContent(content));
     return `File written: ${filePath}`;
   }
 
+  // Patch operation: replace specific text in a file without full content transfer
+  async patchFile(filePath, oldText, newText) {
+    await this._ensureRepo();
+    const fullPath = path.join(this.repoPath, filePath);
+    const content = await readFile(fullPath, 'utf-8');
+
+    const occurrences = content.split(oldText).length - 1;
+    if (occurrences === 0) {
+      throw new Error(`Text to replace not found in ${filePath}`);
+    }
+    if (occurrences > 1) {
+      throw new Error(`Found ${occurrences} occurrences of the text in ${filePath}. Please provide a more specific match (include surrounding context).`);
+    }
+
+    const newContent = content.replace(oldText, newText);
+    await fsWriteFile(fullPath, newContent, 'utf-8');
+    this._fileHashes.set(filePath, this._hashContent(newContent));
+    return `Patched ${filePath}: replaced 1 occurrence (${oldText.length} chars → ${newText.length} chars)`;
+  }
+
+  // Push: pull first to avoid conflicts, then commit and push
   async commitAndPush(message = 'Update from Claude Code') {
+    // Always pull before push to detect conflicts
+    await this._forcePull();
+
+    // Check if there are changes to commit
+    const { stdout: status } = await exec(`cd "${this.repoPath}" && git status --porcelain`);
+    if (!status.trim()) {
+      return 'No changes to commit.';
+    }
+
+    // Show what will be committed
+    const { stdout: diffStat } = await exec(`cd "${this.repoPath}" && git diff --stat`);
+
     const { stdout } = await exec(
       `cd "${this.repoPath}" && git add -A && git commit -m "${message.replace(/"/g, '\\"')}" && git push https://git:${this.gitToken}@git.overleaf.com/${this.projectId}`,
     );
-    return stdout;
+    return `${diffStat}\n${stdout}`;
   }
 
   async getSectionContent(filePath, sectionTitle) {
-    const content = await this.readFile(filePath);
-    const sections = await this.getSections(filePath);
-    
+    const content = await this.readFileFull(filePath);
+    const sections = [];
+    const sectionRegex = /\\(?:section|subsection|subsubsection)\{([^}]+)\}/g;
+    let match;
+    while ((match = sectionRegex.exec(content)) !== null) {
+      sections.push({
+        title: match[1],
+        type: match[0].split('{')[0].replace('\\', ''),
+        index: match.index
+      });
+    }
+
     const targetSection = sections.find(s => s.title === sectionTitle);
     if (!targetSection) {
       throw new Error(`Section "${sectionTitle}" not found`);
     }
-    
+
     const nextSection = sections.find(s => s.index > targetSection.index);
     const startIdx = targetSection.index;
     const endIdx = nextSection ? nextSection.index : content.length;
-    
+
     return content.substring(startIdx, endIdx);
+  }
+
+  // Get diff stat for status summary
+  async getDiffStat() {
+    await this._ensureRepo();
+    try {
+      const { stdout: staged } = await exec(`cd "${this.repoPath}" && git diff --stat`);
+      const { stdout: untracked } = await exec(`cd "${this.repoPath}" && git status --porcelain`);
+      return { staged: staged.trim(), untracked: untracked.trim() };
+    } catch {
+      return { staged: '', untracked: '' };
+    }
   }
 }
 
@@ -128,7 +280,7 @@ class OverleafGitClient {
 const server = new Server(
   {
     name: 'overleaf-mcp-server',
-    version: '1.0.0',
+    version: '1.1.0',
   },
   {
     capabilities: {
@@ -146,7 +298,7 @@ function getProject(projectName = 'default') {
   return new OverleafGitClient(project.projectId, project.gitToken);
 }
 
-// List all projects
+// List all tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
@@ -160,7 +312,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'list_files',
-        description: 'List files in an Overleaf project',
+        description: 'List text files in an Overleaf project (only .tex, .bib, .bst, .cls, .sty files are synced; images and PDFs are skipped)',
         inputSchema: {
           type: 'object',
           properties: {
@@ -170,14 +322,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             extension: {
               type: 'string',
-              description: 'File extension filter (optional, e.g., ".tex")',
+              description: 'File extension filter (optional, e.g., ".tex", ".bib"). Leave empty to list all text files.',
             },
           },
         },
       },
       {
         name: 'read_file',
-        description: 'Read a file from an Overleaf project',
+        description: 'Read a file from an Overleaf project. Returns only the diff if the file was read before and has changes. Use mode="full" to force full content.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -188,6 +340,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             projectName: {
               type: 'string',
               description: 'Project identifier (optional)',
+            },
+            mode: {
+              type: 'string',
+              enum: ['smart', 'full'],
+              description: 'Read mode: "smart" returns diff if previously read (default), "full" always returns complete content',
             },
           },
           required: ['filePath'],
@@ -235,7 +392,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'write_file',
-        description: 'Write content to a file in an Overleaf project (does not auto-push)',
+        description: 'Write content to a file in an Overleaf project (does not auto-push). Does NOT pull from Overleaf first, so use read_file before if you need the latest version.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -245,7 +402,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             content: {
               type: 'string',
-              description: 'Content to write',
+              description: 'Complete content to write',
             },
             projectName: {
               type: 'string',
@@ -256,8 +413,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'patch_file',
+        description: 'Replace specific text in a file without transferring the full content. Much more token-efficient than write_file for small edits. The old_text must match exactly one location in the file.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            filePath: {
+              type: 'string',
+              description: 'Path to the file',
+            },
+            oldText: {
+              type: 'string',
+              description: 'Exact text to find and replace (must be unique in the file)',
+            },
+            newText: {
+              type: 'string',
+              description: 'Text to replace it with',
+            },
+            projectName: {
+              type: 'string',
+              description: 'Project identifier (optional)',
+            },
+          },
+          required: ['filePath', 'oldText', 'newText'],
+        },
+      },
+      {
         name: 'push_changes',
-        description: 'Commit and push all changes to Overleaf',
+        description: 'Commit and push all changes to Overleaf. Pulls latest changes first to avoid conflicts.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -274,7 +457,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'status_summary',
-        description: 'Get a comprehensive project status summary',
+        description: 'Get a comprehensive project status summary including local changes (git diff stat)',
         inputSchema: {
           type: 'object',
           properties: {
@@ -326,12 +509,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'read_file': {
         const client = getProject(args.projectName);
-        const content = await client.readFile(args.filePath);
+        const mode = args.mode || 'smart';
+        let text;
+        if (mode === 'full') {
+          text = await client.readFileFull(args.filePath);
+        } else {
+          text = await client.readFileSmart(args.filePath);
+        }
         return {
           content: [
             {
               type: 'text',
-              text: content,
+              text,
             },
           ],
         };
@@ -376,6 +565,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'patch_file': {
+        const client = getProject(args.projectName);
+        const result = await client.patchFile(args.filePath, args.oldText, args.newText);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: result,
+            },
+          ],
+        };
+      }
+
       case 'push_changes': {
         const client = getProject(args.projectName);
         const result = await client.commitAndPush(args.message || 'Update from Claude Code');
@@ -391,14 +593,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'status_summary': {
         const client = getProject(args.projectName);
-        const files = await client.listFiles();
+        const files = await client.listAllTextFiles();
         const mainFile = files.find(f => f.includes('main.tex')) || files[0];
         let sections = [];
-        
+
         if (mainFile) {
           sections = await client.getSections(mainFile);
         }
-        
+
+        const diffStat = await client.getDiffStat();
+
         return {
           content: [
             {
@@ -408,6 +612,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 mainFile,
                 totalSections: sections.length,
                 files: files.slice(0, 10),
+                localChanges: diffStat.staged || 'No local changes',
+                untrackedFiles: diffStat.untracked || 'None',
               }, null, 2),
             },
           ],
@@ -434,7 +640,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Overleaf MCP server running on stdio');
+  console.error('Overleaf MCP server v1.1.0 running on stdio');
 }
 
 main().catch((error) => {
